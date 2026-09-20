@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8人専用チャット＆掲示板</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+    h1 { font-size: 20px; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
+    .chat-box { height: 300px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background: #fafafa; }
+    .input-box { display: flex; gap: 8px; }
+    input[type="text"] { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .anon-toggle { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>8人専用掲示板・チャット</h1>
+    
+    <!-- 投稿モード選択 -->
+    <div class="anon-toggle">
+      <label><input type="radio" name="postType" value="normal" checked> 通常投稿</label>
+      <label><input type="radio" name="postType" value="anon"> 匿名投稿</label>
+    </div>
+
+    <!-- チャット表示エリア -->
+    <div id="messages" class="chat-box"></div>
+
+    <!-- 送信フォーム -->
+    <div class="input-box">
+      <input type="text" id="messageInput" placeholder="メッセージを入力...">
+      <button id="sendBtn">送信</button>
+    </div>
+  </div>
+
+  <!-- Firebase (SDK v10) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } 
+      from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // ▼ 写真で保存したご自身の Firebase 設定情報に書き換えてください
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    // Firebase 初期化
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const messagesDiv = document.getElementById("messages");
+    const messageInput = document.getElementById("messageInput");
+    const sendBtn = document.getElementById("sendBtn");
+
+    // メッセージのリアルタイム受信
+    const q = query(collection(db, "messages"), orderBy("createdAt", "asc"));
+    onSnapshot(q, (snapshot) => {
+      messagesDiv.innerHTML = "";
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const p = document.createElement("p");
+        const name = data.isAnon ? "匿名" : (data.senderName || "ユーザー");
+        p.textContent = `${name}: ${data.text}`;
+        messagesDiv.appendChild(p);
+      });
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    });
+
+    // メッセージ送信処理
+    sendBtn.addEventListener("click", async () => {
+      const text = messageInput.value.trim();
+      if (!text) return;
+
+      const isAnon = document.querySelector('input[name="postType"]:checked').value === "anon";
+
+      await addDoc(collection(db, "messages"), {
+        text: text,
+        isAnon: isAnon,
+        senderName: "テストユーザー",
+        createdAt: serverTimestamp()
+      });
+
+      messageInput.value = "";
+    });
+  </script>
+</body>
+</html>
