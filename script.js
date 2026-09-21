@@ -1,462 +1,145 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
-import { getDatabase, ref, push, onChildAdded, set, get, child } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js";
-
-// Firebase 実環境設定
-const firebaseConfig = {
-  apiKey: "AIzaSyBeOjoG6sXFBdAFkBl2lgQ2yt7LXMoqz5Q",
-  authDomain: "men-line-9e545.firebaseapp.com",
-  databaseURL: "https://men-line-9e545-default-rtdb.firebaseio.com",
-  projectId: "men-line-9e545",
-  storageBucket: "men-line-9e545.firebasestorage.app",
-  messagingSenderId: "1026870493148",
-  appId: "1:1026870493148:web:144f169c0210816d229919"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
-// 2011678992-Jyti5NM1
-const MY_LIFF_ID = "YOUR_LIFF_ID_HERE";
-
-// ログインユーザー情報
-let currentUser = {
-  uid: null,
-  name: "読み込み中...",
-  avatar: ""
-};
-
-// ★デフォルトをすべて「匿名モード (true)」に設定★
-let isAnonymousMode = true;
-let isBbsAnonMode = true;
-let isModalAnonMode = true;
-
-let selectedBase64Image = null;
-let isLocationSharing = true;
-let currentThreadId = null;
-
-// --- LINE LIFF ログイン・プロファイル取得 ---
-async function initLiff() {
-  try {
-    await liff.init({ liffId: MY_LIFF_ID });
-
-    if (!liff.isLoggedIn()) {
-      liff.login();
-      return;
-    }
-
-    const profile = await liff.getProfile();
-    currentUser.uid = profile.userId;
-    currentUser.name = profile.displayName;
-    currentUser.avatar = profile.pictureUrl || "https://via.placeholder.com/64";
-
-    // Firebaseへユーザープロフィール同期
-    await set(ref(db, 'users/' + currentUser.uid), {
-      name: currentUser.name,
-      avatar: currentUser.avatar,
-      lastSeen: Date.now()
-    });
-
-    // UIの反映
-    document.getElementById('user-name').innerText = currentUser.name;
-    document.getElementById('user-avatar').src = currentUser.avatar;
-
-  } catch (err) {
-    console.error("LIFFログインエラー:", err);
-    alert("LINEログインの初期化に失敗しました。LIFF IDの設定を確認してください。");
-  }
+:root {
+--line-green: #06C755;
+--line-green-dark: #05b34c;
+--line-bg: #8cabd9;
+--bg-color: #f7f9fa;
+--card-bg: #ffffff;
+--text-main: #1e293b;
+--text-sub: #64748b;
+--border-color: #e2e8f0;
 }
-
-// --- ページ切替 ---
-window.switchPage = function(pageId, title, subTitle = '') {
-  document.querySelectorAll('.page-content').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-  
-  document.getElementById('page-' + pageId).classList.add('active');
-  if (window.event && window.event.currentTarget) {
-    window.event.currentTarget.classList.add('active');
-  }
-  
-  document.getElementById('header-title').innerText = title;
-  document.getElementById('header-sub').innerText = subTitle;
-
-  if (pageId === 'location') updateUserLocation();
-};
-
-// --- Web Push 通知機能 ---
-window.requestNotificationPermission = function() {
-  if ("Notification" in window) {
-    Notification.requestPermission().then(permission => {
-      if (permission === "granted") {
-        alert("🔔 プッシュ通知が有効になりました！");
-      } else {
-        alert("通知の許可が得られませんでした。");
-      }
-    });
-  }
-};
-
-function sendLocalNotification(title, body) {
-  if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
-    new Notification(title, { body: body, icon: currentUser.avatar });
-  }
+￼ { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+background-color: var(--bg-color);
+color: var(--text-main);
+height: 100vh;
+display: flex;
+flex-direction: column;
+overflow: hidden;
 }
-
-// --- 1. トーク機能（デフォルト匿名） ---
-window.toggleAnonymous = function() {
-  isAnonymousMode = !isAnonymousMode;
-  const btn = document.getElementById('anon-toggle-btn');
-  const icon = document.getElementById('anon-icon');
-  const label = document.getElementById('anon-label');
-
-  if (isAnonymousMode) {
-    btn.classList.add('is-anon');
-    icon.innerText = '🕵️'; label.innerText = '匿名';
-  } else {
-    btn.classList.remove('is-anon');
-    icon.innerText = '👤'; label.innerText = '通常';
-  }
-};
-
-window.sendChatMessage = function() {
-  const input = document.getElementById('chat-input');
-  const text = input.value.trim();
-  if (!text || !currentUser.uid) return;
-
-  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-  push(ref(db, 'chats'), {
-    senderUid: currentUser.uid,
-    senderName: isAnonymousMode ? '名無しさん' : currentUser.name,
-    senderAvatar: isAnonymousMode ? '' : currentUser.avatar,
-    text: text,
-    isAnon: isAnonymousMode,
-    time: timeStr,
-    timestamp: Date.now()
-  });
-
-  input.value = '';
-};
-
-window.handleKeyPress = function(e) { if (e.key === 'Enter') sendChatMessage(); };
-
-onChildAdded(ref(db, 'chats'), (snapshot) => {
-  const data = snapshot.val();
-  const chatContainer = document.getElementById('chat-messages');
-
-  const isMe = data.senderUid === currentUser.uid && !data.isAnon;
-  const msgRow = document.createElement('div');
-  msgRow.className = isMe ? 'message-row me' : 'message-row other';
-
-  const avatarSrc = data.isAnon || !data.senderAvatar ? 'https://via.placeholder.com/36/334155/fff?text=🕵️' : data.senderAvatar;
-  const bubbleClass = isMe ? 'msg-bubble my-bubble' : (data.isAnon ? 'msg-bubble anon-bubble' : 'msg-bubble');
-
-  msgRow.innerHTML = `
-    ${!isMe ? `<img src="${avatarSrc}" class="msg-avatar">` : ''}
-    <div class="msg-content">
-      ${!isMe ? `<span class="msg-author">${escapeHtml(data.senderName)}</span>` : ''}
-      <div class="${bubbleClass}">${escapeHtml(data.text)}</div>
-      <span class="msg-time">${data.time}</span>
-    </div>
-  `;
-
-  chatContainer.appendChild(msgRow);
-  chatContainer.scrollTop = chatContainer.scrollHeight;
-
-  if (!isMe) sendLocalNotification(data.senderName, data.text);
-});
-
-// --- 2. 画像添付 ✕ ショート機能 ---
-window.previewImage = function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = function(event) {
-    const img = new Image();
-    img.src = event.target.result;
-    img.onload = function() {
-      const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 600;
-      const scale = MAX_WIDTH / img.width;
-      canvas.width = (img.width > MAX_WIDTH) ? MAX_WIDTH : img.width;
-      canvas.height = (img.width > MAX_WIDTH) ? img.height * scale : img.height;
-
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      selectedBase64Image = canvas.toDataURL('image/jpeg', 0.6);
-      document.getElementById('image-preview').src = selectedBase64Image;
-      document.getElementById('image-preview-container').style.display = 'block';
-    };
-  };
-  reader.readAsDataURL(file);
-};
-
-window.submitShortPost = function() {
-  const text = document.getElementById('short-input').value.trim();
-  if (!text && !selectedBase64Image) {
-    alert('文字または画像を入力してください！');
-    return;
-  }
-
-  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-  push(ref(db, 'shorts'), {
-    senderUid: currentUser.uid,
-    senderName: currentUser.name,
-    senderAvatar: currentUser.avatar,
-    text: text,
-    image: selectedBase64Image || null,
-    time: timeStr,
-    timestamp: Date.now()
-  });
-
-  document.getElementById('short-input').value = '';
-  document.getElementById('image-preview-container').style.display = 'none';
-  selectedBase64Image = null;
-  alert('⚡ ショートに投稿しました！');
-};
-
-onChildAdded(ref(db, 'shorts'), (snapshot) => {
-  const data = snapshot.val();
-  const timeline = document.getElementById('short-timeline');
-
-  const card = document.createElement('div');
-  card.className = 'card';
-  let imgTag = data.image ? `<img src="${data.image}" style="width:100%; border-radius:12px; margin-top:8px;">` : '';
-
-  card.innerHTML = `
-    <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-      <img src="${data.senderAvatar}" style="width:32px; height:32px; border-radius:50%;">
-      <div style="flex:1;"><b style="font-size:13px;">${escapeHtml(data.senderName)}</b></div>
-      <span style="font-size:11px; color:#64748b;">${data.time}</span>
-    </div>
-    <div style="font-size:14px;">${escapeHtml(data.text)}</div>
-    ${imgTag}
-  `;
-
-  timeline.prepend(card);
-});
-
-// --- 3. 掲示板機能（デフォルト匿名） ---
-window.openThreadModal = () => {
-  document.getElementById('create-thread-modal').style.display = 'flex';
-  selectModalAnon(true);
-};
-
-window.closeThreadModal = () => {
-  document.getElementById('create-thread-modal').style.display = 'none';
-  document.getElementById('modal-thread-title').value = '';
-  document.getElementById('modal-thread-body').value = '';
-};
-
-window.selectModalAnon = (isAnon) => {
-  isModalAnonMode = isAnon;
-  document.getElementById('radio-label-normal').classList.toggle('active', !isAnon);
-  document.getElementById('radio-label-anon').classList.toggle('active', isAnon);
-};
-
-window.submitNewThread = function() {
-  const title = document.getElementById('modal-thread-title').value.trim();
-  const body = document.getElementById('modal-thread-body').value.trim();
-  if (!title || !body) return alert('タイトルと本文を入力してください！');
-
-  const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const authorName = isModalAnonMode ? '名無しさん' : currentUser.name;
-
-  const newThreadRef = push(ref(db, 'bbs/threads'));
-  
-  const initialResponse = {
-    num: 1,
-    author: authorName,
-    isAnon: isModalAnonMode,
-    time: timeStr,
-    id: currentUser.uid ? currentUser.uid.substring(0, 6) : 'guest',
-    body: body
-  };
-
-  set(newThreadRef, {
-    title: title,
-    createdAt: timeStr,
-    responses: [initialResponse]
-  });
-
-  window.closeThreadModal();
-};
-
-onChildAdded(ref(db, 'bbs/threads'), (snapshot) => {
-  const threadId = snapshot.key;
-  const data = snapshot.val();
-  const container = document.getElementById('thread-list-container');
-
-  const item = document.createElement('div');
-  item.className = 'thread-item';
-  item.onclick = () => window.openThreadDetail(threadId);
-  item.innerHTML = `
-    <div class="thread-item-title">${escapeHtml(data.title)}</div>
-    <div class="thread-item-meta">
-      <span>レス: ${data.responses ? data.responses.length : 1}</span>
-      <span>作成: ${data.createdAt}</span>
-    </div>
-  `;
-  container.prepend(item);
-});
-
-window.openThreadDetail = async function(threadId) {
-  currentThreadId = threadId;
-  document.getElementById('thread-list-container').style.display = 'none';
-  document.querySelector('.bbs-top-bar').style.display = 'none';
-  document.getElementById('thread-detail-container').style.display = 'flex';
-
-  const snapshot = await get(child(ref(db), `bbs/threads/${threadId}`));
-  if (snapshot.exists()) {
-    const threadData = snapshot.val();
-    document.getElementById('detail-thread-title').innerText = threadData.title;
-    renderResponses(threadData.responses || []);
-  }
-};
-
-window.backToThreadList = function() {
-  document.getElementById('thread-detail-container').style.display = 'none';
-  document.getElementById('thread-list-container').style.display = 'flex';
-  document.querySelector('.bbs-top-bar').style.display = 'block';
-  currentThreadId = null;
-};
-
-function renderResponses(responses) {
-  const resContainer = document.getElementById('res-list');
-  resContainer.innerHTML = '';
-
-  responses.forEach(r => {
-    const resCard = document.createElement('div');
-    resCard.className = 'res-card';
-    const authorClass = r.isAnon ? 'res-author anon' : 'res-author';
-
-    resCard.innerHTML = `
-      <div class="res-header">
-        <span class="res-num">${r.num}</span>
-        <span class="${authorClass}">${escapeHtml(r.author)}</span>
-        <span>${r.time}</span>
-        <span>ID:${r.id}</span>
-      </div>
-      <div class="res-body">${escapeHtml(r.body)}</div>
-    `;
-    resContainer.appendChild(resCard);
-  });
-  resContainer.scrollTop = resContainer.scrollHeight;
+header {
+background: #ffffff;
+padding: 12px 16px;
+border-bottom: 1px solid var(--border-color);
+display: flex;
+justify-content: space-between;
+align-items: center;
+position: sticky;
+top: 0; z-index: 10;
 }
-
-window.toggleBbsAnonymous = function() {
-  isBbsAnonMode = !isBbsAnonMode;
-  const btn = document.getElementById('bbs-anon-toggle-btn');
-  btn.classList.toggle('is-anon', isBbsAnonMode);
-  document.getElementById('bbs-anon-icon').innerText = isBbsAnonMode ? '🕵️' : '👤';
-  document.getElementById('bbs-anon-label').innerText = isBbsAnonMode ? '匿名' : '通常';
-};
-
-window.sendBbsRes = async function() {
-  const input = document.getElementById('bbs-res-input');
-  const text = input.value.trim();
-  if (!text || !currentThreadId) return;
-
-  const snapshot = await get(child(ref(db), `bbs/threads/${currentThreadId}`));
-  if (snapshot.exists()) {
-    const threadData = snapshot.val();
-    const responses = threadData.responses || [];
-
-    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const newRes = {
-      num: responses.length + 1,
-      author: isBbsAnonMode ? '名無しさん' : currentUser.name,
-      isAnon: isBbsAnonMode,
-      time: timeStr,
-      id: currentUser.uid ? currentUser.uid.substring(0, 6) : 'guest',
-      body: text
-    };
-
-    responses.push(newRes);
-    await set(ref(db, `bbs/threads/${currentThreadId}/responses`), responses);
-
-    renderResponses(responses);
-    input.value = '';
-  }
-};
-
-window.handleBbsKeyPress = function(e) { if (e.key === 'Enter') sendBbsRes(); };
-
-// --- 4. 位置情報機能（端末GPS・実データ連動） ---
-window.toggleLocationSharing = function() {
-  isLocationSharing = !isLocationSharing;
-  const btn = document.getElementById('btn-loc-toggle');
-  btn.innerText = isLocationSharing ? "共有: ON" : "共有: OFF";
-  btn.style.background = isLocationSharing ? "var(--line-green)" : "#64748b";
-
-  if (isLocationSharing) {
-    updateUserLocation();
-  } else {
-    document.getElementById('map-pins-container').innerHTML = '';
-  }
-};
-
-function updateUserLocation() {
-  if (!isLocationSharing || !navigator.geolocation) return;
-
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-
-      if (currentUser.uid) {
-        set(ref(db, 'locations/' + currentUser.uid), {
-          name: currentUser.name,
-          avatar: currentUser.avatar,
-          lat: lat,
-          lng: lng,
-          updatedAt: Date.now()
-        });
-      }
-
-      renderMapPin(lat, lng);
-    },
-    (error) => {
-      console.warn("位置情報の取得許可が得られませんでした:", error);
-    }
-  );
+.header-content { display: flex; align-items: baseline; gap: 8px; }
+header h1 { font-size: 18px; font-weight: 700; color: var(--text-main); }
+.header-sub { font-size: 12px; color: var(--text-sub); }
+.btn-icon-header { background: none; border: none; font-size: 20px; cursor: pointer; }
+.page-content { flex: 1; overflow-y: auto; display: none; padding: 16px; padding-bottom: 80px; }
+.page-content.active { display: block; }
+.card {
+background: var(--card-bg);
+border-radius: 16px;
+padding: 16px;
+margin-bottom: 16px;
+box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+border: 1px solid var(--border-color);
 }
-
-function renderMapPin(lat, lng) {
-  const container = document.getElementById('map-pins-container');
-  if (!container) return;
-  container.innerHTML = '';
-
-  const pin = document.createElement('div');
-  pin.className = 'map-pin';
-  pin.style.left = '50%';
-  pin.style.top = '50%';
-  
-  pin.innerHTML = `
-    <div class="pin-avatar-wrapper">
-      <img src="${currentUser.avatar}" class="pin-avatar">
-    </div>
-    <span class="pin-name">${escapeHtml(currentUser.name)}</span>
-  `;
-
-  pin.onclick = () => {
-    const card = document.getElementById('user-location-card');
-    document.getElementById('card-avatar').src = currentUser.avatar;
-    document.getElementById('card-name').innerText = currentUser.name;
-    document.getElementById('card-address').innerText = `📍 緯度:${lat.toFixed(2)} 経度:${lng.toFixed(2)}`;
-    card.style.display = 'block';
-  };
-
-  container.appendChild(pin);
+.card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.badge { font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 20px; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.profile-card { display: flex; align-items: center; gap: 16px; }
+.avatar-wrapper { position: relative; }
+.avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; }
+.online-indicator { position: absolute; bottom: 2px; right: 2px; width: 12px; height: 12px; background: var(--line-green); border: 2px solid #fff; border-radius: 50%; }
+.short-post-box textarea {
+width: 100%; height: 70px; border: 1px solid var(--border-color); border-radius: 12px;
+padding: 10px; font-size: 14px; resize: none; outline: none; background: #f8fafc;
 }
-
-function escapeHtml(str) {
-  return str ? String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') : '';
+.post-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.btn-primary { background: var(--line-green); color: #fff; border: none; padding: 8px 18px; border-radius: 20px; font-weight: 700; font-size: 13px; cursor: pointer; }
+.btn-primary:active { background: var(--line-green-dark); }
+.btn-icon { background: #f1f5f9; border: none; padding: 8px 12px; border-radius: 20px; font-size: 12px; color: var(--text-sub); cursor: pointer; }
+.menu-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; text-align: center; }
+.menu-item { cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--text-sub); }
+.icon-box { width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+.icon-game { background: #e0e7ff; } .icon-gift { background: #fce7f3; } .icon-theme { background: #fef3c7; } .icon-more { background: #f1f5f9; }
+/* LINE風トーク画面 */
+.chat-page { padding: 0; background: var(--line-bg); display: flex; flex-direction: column; height: calc(100vh - 120px); }
+.chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.system-message { text-align: center; margin: 8px 0; }
+.system-message span { background: rgba(0,0,0,0.2); color: #fff; font-size: 11px; padding: 4px 12px; border-radius: 12px; }
+.message-row { display: flex; gap: 8px; max-width: 80%; }
+.message-row.me { align-self: flex-end; flex-direction: row-reverse; }
+.msg-avatar { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
+.msg-content { display: flex; flex-direction: column; gap: 2px; }
+.msg-author { font-size: 11px; color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+.msg-bubble { background: #ffffff; padding: 10px 14px; border-radius: 18px; font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-break: break-word; }
+.my-bubble { background: var(--line-green); color: #ffffff; }
+.anon-bubble { background: #334155; color: #f8fafc; }
+.msg-time { font-size: 9px; color: rgba(255,255,255,0.8); align-self: flex-end; }
+.chat-input-bar {
+position: fixed; bottom: 60px; left: 0; right: 0;
+background: #ffffff; padding: 8px 12px; border-top: 1px solid var(--border-color);
+display: flex; align-items: center; gap: 8px; z-index: 10;
 }
-
-// 初期化実行
-document.addEventListener('DOMContentLoaded', () => {
-  initLiff();
-});
+.anon-toggle-btn {
+display: flex; align-items: center; gap: 4px; background: #f1f5f9; border: 1px solid var(--border-color);
+padding: 6px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; color: var(--text-sub); cursor: pointer;
+}
+.anon-toggle-btn.is-anon { background: #1e293b; color: #f8fafc; }
+.chat-input-bar input[type="text"] { flex: 1; border: 1px solid var(--border-color); border-radius: 20px; padding: 8px 14px; font-size: 14px; outline: none; background: #f8fafc; }
+.chat-send-btn { background: var(--line-green); color: white; border: none; padding: 8px 14px; border-radius: 18px; font-size: 12px; font-weight: bold; cursor: pointer; }
+/* 2ch/5ch風 掲示板 */
+.bbs-page { padding: 0; display: flex; flex-direction: column; }
+.bbs-top-bar { padding: 8px 12px; background: rgba(255, 255, 255, 0.9); border-bottom: 1px solid var(--border-color); position: sticky; top: 0; z-index: 5; }
+.btn-create-thread { width: 100%; padding: 8px 0; background: #e0f2fe; color: #0369a1; border: 1px dashed #0284c7; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.thread-list { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.thread-item { background: var(--card-bg); border-radius: 12px; padding: 12px 16px; border: 1px solid var(--border-color); cursor: pointer; }
+.thread-item-title { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+.thread-item-meta { font-size: 11px; color: var(--text-sub); display: flex; gap: 12px; }
+.thread-detail { flex: 1; display: flex; flex-direction: column; background: #f8fafc; }
+.thread-detail-header { background: #fff; padding: 10px 14px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 12px; }
+.btn-back-bbs { background: none; border: none; color: var(--line-green); font-weight: bold; cursor: pointer; }
+.res-list { flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 120px; display: flex; flex-direction: column; gap: 10px; }
+.res-card { background: #fff; border-radius: 8px; padding: 10px 12px; border: 1px solid #e2e8f0; }
+.res-header { font-size: 11px; color: #64748b; margin-bottom: 6px; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; }
+.res-num { font-weight: bold; color: #0284c7; margin-right: 6px; }
+.res-author { font-weight: bold; color: #15803d; margin-right: 6px; }
+.res-author.anon { color: #64748b; }
+.res-body { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+/* ショートタイムライン */
+.short-timeline-container { padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+/* 位置情報 (whoo風) */
+.location-page { padding: 0; position: relative; height: calc(100vh - 120px); overflow: hidden; background: #e2e8f0; }
+.map-bg { width: 100%; height: 100%; background-color: #f1f5f9; background-image: radial-gradient(#cbd5e1 1px, transparent 1px); background-size: 20px 20px; position: relative; }
+.map-header-status { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; z-index: 10; }
+.status-badge { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px); padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: bold; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
+.btn-location-toggle { background: var(--line-green); color: white; border: none; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; cursor: pointer; }
+.map-pin { position: absolute; display: flex; flex-direction: column; align-items: center; cursor: pointer; transition: all 0.3s; transform: translate(-50%, -50%); }
+.pin-avatar-wrapper { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background: #fff; }
+.pin-avatar { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.pin-name { background: rgba(15, 23, 42, 0.8); color: #fff; font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 10px; margin-top: 4px; white-space: nowrap; }
+.location-card { position: absolute; bottom: 20px; left: 16px; right: 16px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); border-radius: 20px; padding: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border: 1px solid var(--border-color); z-index: 30; }
+.loc-card-header { display: flex; align-items: center; gap: 12px; }
+.loc-avatar { width: 44px; height: 44px; border-radius: 50%; }
+.loc-user-info { flex: 1; }
+.loc-user-info h4 { font-size: 15px; font-weight: bold; }
+.loc-user-info p { font-size: 11px; color: var(--text-sub); }
+.loc-card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-sub); }
+.btn-chat-direct { background: var(--line-green); color: #fff; border: none; padding: 6px 12px; border-radius: 14px; font-weight: bold; font-size: 11px; cursor: pointer; }
+/* モーダル */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 16px; }
+.modal-content { background: #fff; border-radius: 16px; width: 100%; max-width: 400px; padding: 20px; }
+.modal-content h3 { font-size: 16px; font-weight: bold; margin-bottom: 12px; }
+.modal-label { font-size: 12px; font-weight: bold; color: var(--text-sub); display: block; margin-top: 10px; margin-bottom: 4px; }
+.modal-input, .modal-textarea { width: 100%; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; font-size: 14px; outline: none; background: #f8fafc; }
+.modal-textarea { height: 60px; resize: none; }
+.modal-radio-group { display: flex; gap: 8px; margin-top: 6px; }
+.radio-card { flex: 1; border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; text-align: center; font-size: 12px; cursor: pointer; background: #f8fafc; }
+.radio-card.active { border-color: var(--line-green); background: #dcfce7; font-weight: bold; color: #15803d; }
+.radio-card input { display: none; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn-cancel { background: #f1f5f9; border: none; padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--text-sub); }
+/* ナビゲーション */
+.bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); border-top: 1px solid var(--border-color); display: flex; z-index: 100; }
+.tab-btn { flex: 1; border: none; background: none; color: #94a3b8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 10px; font-weight: 600; cursor: pointer; }
+.nav-icon { font-size: 18px; }
+.tab-btn.active { color: var(--line-green); }
