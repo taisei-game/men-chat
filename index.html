@@ -3,92 +3,275 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>8人専用チャット＆掲示板</title>
-  <style>
-    body { font-family: sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-    .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
-    h1 { font-size: 20px; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
-    .chat-box { height: 300px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin-bottom: 10px; background: #fafafa; }
-    .input-box { display: flex; gap: 8px; }
-    input[type="text"] { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
-    button { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-    .anon-toggle { margin-bottom: 10px; }
-  </style>
+  <title>男性パート</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div class="container">
-    <h1>8人専用掲示板・チャット</h1>
-    
-    <!-- 投稿モード選択 -->
-    <div class="anon-toggle">
-      <label><input type="radio" name="postType" value="normal" checked> 通常投稿</label>
-      <label><input type="radio" name="postType" value="anon"> 匿名投稿</label>
+
+  <!-- 0. オンボーディング / ログイン＆権限ダイアログ -->
+  <div id="auth-overlay" class="modal-overlay full-screen">
+    <!-- STEP 0: パスワード入力画面 -->
+    <div id="auth-step-password" class="auth-card">
+      <div class="auth-icon">🔒</div>
+      <h2>パスワードを入力</h2>
+      <p>このアプリはメンバー専用です。共有されたパスワード（10595656）を入力してください。</p>
+      <input type="password" id="app-password-input" class="auth-input" placeholder="パスワード" onkeypress="handlePassKeyPress(event)">
+      <div id="password-error" class="error-msg">パスワードが正しくありません</div>
+      <button class="btn-primary" style="width: 100%; padding: 12px 0; border-radius: 14px;" onclick="verifyPassword()">認証する</button>
     </div>
 
-    <!-- チャット表示エリア -->
-    <div id="messages" class="chat-box"></div>
+    <!-- STEP 1: LINEログイン画面 -->
+    <div id="auth-step-login" class="auth-card" style="display: none;">
+      <div class="auth-icon">💬</div>
+      <h2>男性パートへようこそ</h2>
+      <p>8人専用のプライベートグループへ参加するために、LINEアカウントでログインしてください。</p>
+      <button class="btn-line-login" onclick="startLineLogin()">
+        <span class="line-icon">🟩</span> LINEでログイン
+      </button>
+    </div>
 
-    <!-- 送信フォーム -->
-    <div class="input-box">
-      <input type="text" id="messageInput" placeholder="メッセージを入力...">
-      <button id="sendBtn">送信</button>
+    <!-- STEP 2: 通知の許可確認 -->
+    <div id="auth-step-notification" class="auth-card" style="display: none;">
+      <div class="auth-icon">🔔</div>
+      <h2>通知を許可しますか？</h2>
+      <p>グルラの新着メッセージや、掲示板のレス投稿を1件ずつリアルタイムでお知らせします。</p>
+      <div class="auth-actions">
+        <button class="btn-secondary" onclick="nextAuthStep('location')">あとで</button>
+        <button class="btn-primary" onclick="requestNotificationPermission()">通知を許可する</button>
+      </div>
+    </div>
+
+    <!-- STEP 3: 位置情報の許可確認 (whoo連携) -->
+    <div id="auth-step-location" class="auth-card" style="display: none;">
+      <div class="auth-icon">📍</div>
+      <h2>位置情報の共有を許可しますか？</h2>
+      <p>whooのように仲間8人の現在地やバッテリー残量をリアルタイムで共有できます。</p>
+      <div class="auth-actions">
+        <button class="btn-secondary" onclick="completeAuth()">あとで</button>
+        <button class="btn-primary" onclick="requestLocationPermission()">位置情報を許可する</button>
+      </div>
     </div>
   </div>
 
-  <!-- Firebase (SDK v10) -->
-  <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp } 
-      from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  <!-- メインヘッダー -->
+  <header id="main-header">
+    <div class="header-content">
+      <h1 id="header-title">ホーム</h1>
+      <span class="header-sub" id="header-sub"></span>
+    </div>
+  </header>
 
-    // ▼ 写真で保存したご自身の Firebase 設定情報に書き換えてください
-    const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
-    };
+  <!-- 1. ホーム画面 -->
+  <div id="page-home" class="page-content active">
+    <section class="card profile-card">
+      <div class="avatar-wrapper">
+        <img id="user-avatar" src="https://via.placeholder.com/64" alt="アイコン" class="avatar">
+        <span class="online-indicator"></span>
+      </div>
+      <div class="profile-info">
+        <h3 id="user-name">ポメラニアン</h3>
+        <p id="user-status">いぬです 🐾</p>
+      </div>
+    </section>
 
-    // Firebase 初期化
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
+    <section class="card short-post-box">
+      <div class="card-header">
+        <span class="badge badge-blue">⚡ SHORT</span>
+        <h4>ショートに投稿</h4>
+      </div>
+      <textarea id="short-input" placeholder="今なにしてる？写真や動画と一緒にシェアしよう"></textarea>
+      <div class="post-actions">
+        <input type="file" id="short-file" accept="image/*,video/*" style="display:none;">
+        <button class="btn-icon" onclick="document.getElementById('short-file').click()">📷 メディアを選択</button>
+        <button class="btn-primary" onclick="submitShortPost()">投稿する</button>
+      </div>
+    </section>
 
-    const messagesDiv = document.getElementById("messages");
-    const messageInput = document.getElementById("messageInput");
-    const sendBtn = document.getElementById("sendBtn");
+    <section class="card menu-section">
+      <div class="card-header">
+        <span class="badge badge-green">🎮 MENU</span>
+        <h4>アクティビティ</h4>
+      </div>
+      <div class="menu-grid">
+        <div class="menu-item"><div class="icon-box icon-game">🎮</div><span>ゲーム</span></div>
+        <div class="menu-item"><div class="icon-box icon-gift">🎁</div><span>ギフト</span></div>
+        <div class="menu-item"><div class="icon-box icon-theme">🎨</div><span>着せかえ</span></div>
+        <div class="menu-item"><div class="icon-box icon-more">➕</div><span>追加機能</span></div>
+      </div>
+    </section>
+  </div>
 
-    // メッセージのリアルタイム受信
-    const q = query(collection(db, "messages"), orderBy("createdAt", "asc"));
-    onSnapshot(q, (snapshot) => {
-      messagesDiv.innerHTML = "";
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        const p = document.createElement("p");
-        const name = data.isAnon ? "匿名" : (data.senderName || "ユーザー");
-        p.textContent = `${name}: ${data.text}`;
-        messagesDiv.appendChild(p);
-      });
-      messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    });
+  <!-- 2. トーク画面（グループチャット本体） -->
+  <div id="page-talk" class="page-content chat-page">
+    <div id="chat-messages" class="chat-messages">
+      <div class="system-message"><span>グループ「男性パート (8人)」が開設されました</span></div>
+      
+      <div class="message-row other">
+        <img src="https://via.placeholder.com/40" class="msg-avatar" alt="ユーザー">
+        <div class="msg-content">
+          <span class="msg-author">田中</span>
+          <div class="msg-bubble">明日8時集合で大丈夫？</div>
+          <span class="msg-time">10:52</span>
+        </div>
+      </div>
 
-    // メッセージ送信処理
-    sendBtn.addEventListener("click", async () => {
-      const text = messageInput.value.trim();
-      if (!text) return;
+      <div class="message-row other anonymous">
+        <div class="msg-avatar anon-avatar">🕵️</div>
+        <div class="msg-content">
+          <span class="msg-author anon-name">名無しさん</span>
+          <div class="msg-bubble anon-bubble">了解、8時に駅前ね！</div>
+          <span class="msg-time">10:53</span>
+        </div>
+      </div>
 
-      const isAnon = document.querySelector('input[name="postType"]:checked').value === "anon";
+      <!-- 未読位置スクロールバー -->
+      <div id="unread-divider" class="unread-divider">
+        <span>ここから未読メッセージ</span>
+      </div>
 
-      await addDoc(collection(db, "messages"), {
-        text: text,
-        isAnon: isAnon,
-        senderName: "テストユーザー",
-        createdAt: serverTimestamp()
-      });
+      <div class="message-row me">
+        <div class="msg-content">
+          <div class="msg-bubble my-bubble">俺も8時で行くわ！</div>
+          <span class="msg-time">10:54</span>
+        </div>
+      </div>
+    </div>
 
-      messageInput.value = "";
-    });
-  </script>
+    <div class="chat-input-bar">
+      <button id="anon-toggle-btn" class="anon-toggle-btn" onclick="toggleAnonymous()">
+        <span id="anon-icon">👤</span><span id="anon-label">通常</span>
+      </button>
+      <input type="text" id="chat-input" placeholder="メッセージを入力..." onkeypress="handleKeyPress(event)">
+      <button class="chat-media-btn" onclick="document.getElementById('chat-file').click()">📎</button>
+      <input type="file" id="chat-file" style="display:none;" accept="image/*,video/*">
+      <button class="chat-send-btn" onclick="sendChatMessage()">送信</button>
+    </div>
+  </div>
+
+  <!-- 3. 掲示板画面 -->
+  <div id="page-bbs" class="page-content bbs-page">
+    <div class="bbs-top-bar">
+      <button class="btn-create-thread" onclick="openThreadModal()">＋ スレッド作成</button>
+    </div>
+
+    <div id="thread-list-container" class="thread-list"></div>
+
+    <div id="thread-detail-container" class="thread-detail" style="display: none;">
+      <div class="thread-detail-header">
+        <button class="btn-back-bbs" onclick="backToThreadList()">‹ スレ一覧</button>
+        <h3 id="detail-thread-title">スレッドタイトル</h3>
+      </div>
+      
+      <div id="res-list" class="res-list"></div>
+
+      <div class="chat-input-bar bbs-input-bar">
+        <button id="bbs-anon-toggle-btn" class="anon-toggle-btn" onclick="toggleBbsAnonymous()">
+          <span id="bbs-anon-icon">👤</span><span id="bbs-anon-label">通常</span>
+        </button>
+        <input type="text" id="bbs-res-input" placeholder="レスを書き込む..." onkeypress="handleBbsKeyPress(event)">
+        <button class="chat-send-btn" onclick="sendBbsRes()">書き込む</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. ショート画面 -->
+  <div id="page-short" class="page-content short-page">
+    <div id="short-feed-container" class="short-feed"></div>
+  </div>
+
+  <!-- 5. 位置情報画面 (whoo風) -->
+  <div id="page-location" class="page-content location-page">
+    <div class="map-bg">
+      <div class="map-grid"></div>
+      <div id="map-pins-container"></div>
+    </div>
+
+    <div class="map-header-status">
+      <span class="status-badge">📍 8人中 8人が共有中</span>
+    </div>
+
+    <div id="user-location-card" class="location-card" style="display: none;">
+      <div class="loc-card-header">
+        <img id="card-avatar" src="" class="loc-avatar">
+        <div class="loc-user-info">
+          <h4 id="card-name">ユーザー名</h4>
+          <p id="card-address">📍 東京都渋谷区 付近</p>
+        </div>
+        <div class="loc-battery">
+          <span id="card-battery-icon">🔋</span>
+          <span id="card-battery-level">85%</span>
+        </div>
+      </div>
+      <div class="loc-card-footer">
+        <span id="card-time">滞在時間: 15分</span>
+        <button class="btn-chat-direct" onclick="openDirectChat()">💬 トークを開く</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル：スレッド作成 -->
+  <div id="create-thread-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h3>📋 新しいスレッドを作成</h3>
+      <label class="modal-label">スレッド名（タイトル）</label>
+      <input type="text" id="modal-thread-title" placeholder="例: 今日の部活について" class="modal-input">
+
+      <label class="modal-label">1>> 最初の書き込み（本文）</label>
+      <textarea id="modal-thread-body" placeholder="スレッドの概要を入力..." class="modal-textarea"></textarea>
+
+      <label class="modal-label">投稿モード設定</label>
+      <div class="modal-radio-group">
+        <label class="radio-card active" id="radio-label-normal">
+          <input type="radio" name="thread-anon" value="normal" checked onclick="selectModalAnon(false)">
+          <span>👤 通常で作る</span>
+        </label>
+        <label class="radio-card" id="radio-label-anon">
+          <input type="radio" name="thread-anon" value="anon" onclick="selectModalAnon(true)">
+          <span>🕵️ 匿名で作る</span>
+        </label>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeThreadModal()">キャンセル</button>
+        <button class="btn-primary" onclick="submitNewThread()">スレを建てる</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- モーダル：ショートコメント -->
+  <div id="short-comment-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-content comment-modal-content">
+      <div class="comment-modal-header">
+        <h4>💬 コメント (<span id="comment-count">0</span>)</h4>
+        <button class="btn-close-modal" onclick="closeCommentModal()">✕</button>
+      </div>
+      <div id="short-comment-list" class="comment-list"></div>
+      <div class="comment-input-bar">
+        <input type="text" id="short-comment-input" placeholder="コメントを追加..." onkeypress="handleCommentKeyPress(event)">
+        <button class="btn-primary" onclick="sendShortComment()">送信</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 下部ナビゲーションバー -->
+  <nav class="bottom-nav">
+    <button class="tab-btn active" onclick="switchPage('home', 'ホーム', '')">
+      <span class="nav-icon">🏠</span><span>ホーム</span>
+    </button>
+    <button class="tab-btn" onclick="switchPage('talk', '男性パート', '8人のグループ')">
+      <span class="nav-icon">💬</span><span>トーク</span>
+    </button>
+    <button class="tab-btn" onclick="switchPage('bbs', '掲示板', '')">
+      <span class="nav-icon">📋</span><span>掲示板</span>
+    </button>
+    <button class="tab-btn" onclick="switchPage('short', 'ショート', '')">
+      <span class="nav-icon">⚡</span><span>ショート</span>
+    </button>
+    <button class="tab-btn" onclick="switchPage('location', '位置情報', '')">
+      <span class="nav-icon">📍</span><span>位置情報</span>
+    </button>
+  </nav>
+
+  <script src="script.js"></script>
 </body>
 </html>
