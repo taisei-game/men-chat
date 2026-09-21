@@ -1,229 +1,320 @@
-/* 全体基本スタイル */
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-  -webkit-tap-highlight-color: transparent;
+// ==========================================
+// 1. 設定情報の初期化 (Firebase & LINE LIFF)
+// ==========================================
+const firebaseConfig = {
+  apiKey: "AIzaSyDUvIlgEVhH-CDO2HvVXPx8-somFgjj6Ro",
+  authDomain: "men-chat-412f0.firebaseapp.com",
+  databaseURL: "https://men-chat-412f0-default-rtdb.firebaseio.com",
+  projectId: "men-chat-412f0",
+  storageBucket: "men-chat-412f0.firebasestorage.app",
+  messagingSenderId: "261075547935",
+  appId: "1:261075547935:web:3f452b7e774dd8ebbfe22a"
+};
+
+const MY_LIFF_ID = "2011678992-Jyti5NM1";
+const ANON_AVATAR = "https://via.placeholder.com/40/888888/ffffff?text=%E2%9D%93"; // 匿名用アイコン
+
+// Firebase初期化
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// アプリのグローバル状態管理
+const state = {
+  user: {
+    id: "",
+    name: "ゲスト",
+    avatar: "https://via.placeholder.com/40"
+  },
+  postMode: "normal", // 'normal' または 'anon' (手動切り替えまで維持)
+  currentRoom: "main",
+  replyToMessage: null
+};
+
+// ==========================================
+// 2. 起動処理 (LINE LIFF 認証・イベント登録)
+// ==========================================
+window.addEventListener('DOMContentLoaded', () => {
+  initLiff();
+  setupUIEvents();
+  listenToMessages('main');
+  initMap();
+});
+
+// LINE LIFF初期化
+function initLiff() {
+  liff.init({ liffId: MY_LIFF_ID })
+    .then(() => {
+      if (liff.isLoggedIn()) {
+        liff.getProfile().then(profile => {
+          state.user.id = profile.userId;
+          state.user.name = profile.displayName;
+          state.user.avatar = profile.pictureUrl || "https://via.placeholder.com/40";
+          
+          const headerTitle = document.getElementById('page-title');
+          if (headerTitle) {
+            headerTitle.innerText = `💬 トーク (${state.user.name})`;
+          }
+        });
+      } else {
+        liff.login();
+      }
+    })
+    .catch((err) => {
+      console.error("LIFF 初期化エラー:", err);
+    });
 }
 
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background-color: #f2f2f7;
-  color: #000;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
+// ==========================================
+// 3. UIイベント & モード切り替え
+// ==========================================
+function setupUIEvents() {
+  const modeNormalBtn = document.getElementById('mode-normal');
+  const modeAnonBtn = document.getElementById('mode-anon');
+
+  if (modeNormalBtn && modeAnonBtn) {
+    modeNormalBtn.addEventListener('click', () => setPostMode('normal'));
+    modeAnonBtn.addEventListener('click', () => setPostMode('anon'));
+  }
+
+  const sendBtn = document.getElementById('send-btn');
+  if (sendBtn) {
+    sendBtn.addEventListener('click', sendMessage);
+  }
+
+  const msgInput = document.getElementById('message-input');
+  if (msgInput) {
+    msgInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+  }
 }
 
-/* ヘッダー */
-#app-header {
-  background-color: #ffffff;
-  border-bottom: 1px solid #d1d1d6;
-  padding: 12px 16px;
-  text-align: center;
-  z-index: 100;
+// 投稿モード切替（※送信後も指定モードを維持します）
+function setPostMode(mode) {
+  state.postMode = mode;
+  const modeNormalBtn = document.getElementById('mode-normal');
+  const modeAnonBtn = document.getElementById('mode-anon');
+  
+  if (modeNormalBtn && modeAnonBtn) {
+    modeNormalBtn.classList.toggle('active', mode === 'normal');
+    modeAnonBtn.classList.toggle('active', mode === 'anon');
+  }
 }
 
-#page-title {
-  font-size: 17px;
-  font-weight: 600;
+// ==========================================
+// 4. メッセージ送信 & Firebase リアルタイム受信
+// ==========================================
+function sendMessage() {
+  const input = document.getElementById('message-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  const isAnon = state.postMode === 'anon';
+  
+  const messageData = {
+    userId: state.user.id || 'anonymous_user',
+    sender: isAnon ? '匿名' : state.user.name,
+    avatar: isAnon ? ANON_AVATAR : state.user.avatar,
+    text: text,
+    isAnon: isAnon,
+    timestamp: firebase.database.ServerValue.TIMESTAMP,
+    replyTo: state.replyToMessage ? state.replyToMessage : null
+  };
+
+  // Firebase Realtime Database へ追加
+  db.ref(`messages/${state.currentRoom}`).push(messageData)
+    .then(() => {
+      input.value = '';
+      cancelReply();
+    })
+    .catch((err) => {
+      console.error("メッセージ送信エラー:", err);
+    });
 }
 
-/* メインコンテンツ (スクロール可) */
-#app-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  padding: 12px;
-  gap: 12px;
+// リアルタイム受信の監視
+function listenToMessages(roomId) {
+  const container = document.getElementById('message-container');
+  if (!container) return;
+
+  db.ref(`messages/${roomId}`).on('value', (snapshot) => {
+    container.innerHTML = '';
+    const data = snapshot.val();
+    if (!data) return;
+
+    Object.keys(data).forEach((key) => {
+      const msg = data[key];
+      msg.id = key;
+      renderMessage(msg, container);
+    });
+
+    container.scrollTop = container.scrollHeight;
+  });
 }
 
-/* メッセージ表示部 */
-#message-container {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+// メッセージDOMの描画
+function renderMessage(msg, container) {
+  const isSelf = msg.userId === state.user.id;
+  const bubble = document.createElement('div');
+  bubble.className = `message-bubble ${isSelf ? 'self' : 'other'}`;
+  bubble.dataset.msgId = msg.id;
+
+  let replyHtml = '';
+  if (msg.replyTo) {
+    replyHtml = `<div class="reply-preview">↩️ ${msg.replyTo.sender}: ${msg.replyTo.text}</div>`;
+  }
+
+  bubble.innerHTML = `
+    <img src="${msg.avatar}" class="avatar">
+    <div class="msg-content">
+      <div class="msg-header">${msg.sender}</div>
+      ${replyHtml}
+      <div class="msg-text">${escapeHtml(msg.text)}</div>
+    </div>
+  `;
+
+  // 長押しメニュー登録
+  addLongPressEvent(bubble, msg);
+
+  container.appendChild(bubble);
 }
 
-/* メッセージバブル */
-.message-bubble {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  max-width: 80%;
+// HTMLエスケープ処理
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, (m) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+  })[m]);
 }
 
-.message-bubble.self {
-  align-self: flex-end;
-  flex-direction: row-reverse;
+// ==========================================
+// 5. 長押しメニュー (送信取り消し / リプライ / コピー)
+// ==========================================
+function addLongPressEvent(element, msg) {
+  let timer = null;
+
+  const start = (e) => {
+    timer = setTimeout(() => {
+      showContextMenu(e, msg);
+    }, 500);
+  };
+
+  const cancel = () => {
+    if (timer) clearTimeout(timer);
+  };
+
+  element.addEventListener('touchstart', start, { passive: true });
+  element.addEventListener('touchend', cancel);
+  element.addEventListener('touchmove', cancel);
+  element.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    showContextMenu(e, msg);
+  });
 }
 
-.message-bubble.other {
-  align-self: flex-start;
+function showContextMenu(e, msg) {
+  const isSelf = msg.userId === state.user.id;
+  
+  const existing = document.getElementById('custom-context-menu');
+  if (existing) existing.remove();
+
+  const menu = document.createElement('div');
+  menu.id = 'custom-context-menu';
+  menu.className = 'context-menu';
+
+  let menuItems = `
+    <div onclick="replyToMsg('${msg.id}', '${msg.sender}', '${escapeHtml(msg.text)}')">↩️ 返信（リプライ）</div>
+    <div onclick="copyMsgText('${escapeHtml(msg.text)}')">📋 テキストをコピー</div>
+  `;
+
+  if (isSelf) {
+    menuItems += `<div class="danger" onclick="deleteMsg('${msg.id}')">🗑️ 送信取り消し</div>`;
+  }
+
+  menu.innerHTML = menuItems;
+
+  const touch = e.touches ? e.touches[0] : e;
+  menu.style.top = `${touch.clientY}px`;
+  menu.style.left = `${touch.clientX}px`;
+
+  document.body.appendChild(menu);
+
+  setTimeout(() => {
+    document.addEventListener('click', function closeMenu() {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+    });
+  }, 10);
 }
 
-.avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  object-fit: cover;
+// 送信取り消し
+function deleteMsg(msgId) {
+  if (confirm("このメッセージを取り消しますか？")) {
+    db.ref(`messages/${state.currentRoom}/${msgId}`).remove();
+  }
 }
 
-.msg-content {
-  background: #ffffff;
-  padding: 8px 12px;
-  border-radius: 16px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-  font-size: 15px;
-  line-height: 1.4;
+// コピー
+function copyMsgText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    alert("コピーしました");
+  });
 }
 
-.message-bubble.self .msg-content {
-  background-color: #007aff;
-  color: #ffffff;
+// リプライ
+function replyToMsg(msgId, sender, text) {
+  state.replyToMessage = { id: msgId, sender: sender, text: text };
+  let replyBar = document.getElementById('reply-bar');
+  if (!replyBar) {
+    replyBar = document.createElement('div');
+    replyBar.id = 'reply-bar';
+    document.getElementById('input-area').prepend(replyBar);
+  }
+  replyBar.innerHTML = `
+    <span>↩️ ${sender} への返信: ${text}</span>
+    <button onclick="cancelReply()">✕</button>
+  `;
 }
 
-.msg-header {
-  font-size: 11px;
-  color: #8e8e93;
-  margin-bottom: 2px;
+function cancelReply() {
+  state.replyToMessage = null;
+  const replyBar = document.getElementById('reply-bar');
+  if (replyBar) replyBar.remove();
 }
 
-.message-bubble.self .msg-header {
-  color: rgba(255, 255, 255, 0.8);
-  text-align: right;
-}
+// ==========================================
+// 6. 国土地理院地図 (白黒 / 衛星写真 切り替え)
+// ==========================================
+let map = null;
 
-/* リプライ表示 */
-.reply-preview {
-  font-size: 12px;
-  background: rgba(0, 0, 0, 0.05);
-  padding: 4px 8px;
-  border-radius: 8px;
-  margin-bottom: 4px;
-}
+function initMap() {
+  const mapElement = document.getElementById('map');
+  if (!mapElement || typeof L === 'undefined') return;
 
-.message-bubble.self .reply-preview {
-  background: rgba(255, 255, 255, 0.2);
-}
+  // 初期位置：東京周辺
+  map = L.map('map').setView([35.681236, 139.767125], 13);
 
-/* 地図エリア */
-#map-container {
-  width: 100%;
-  height: 200px;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  margin-top: 10px;
-}
+  // 国土地理院タイル URL
+  const stdUrl = 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png'; // 淡色（白黒風）
+  const photoUrl = 'https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg'; // 航空写真
 
-#map {
-  width: 100%;
-  height: 100%;
-}
+  const stdLayer = L.tileLayer(stdUrl, {
+    attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
+    maxZoom: 18
+  }).addTo(map);
 
-/* 入力エリア・フッター */
-#input-area {
-  background: #ffffff;
-  border-top: 1px solid #d1d1d6;
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  const photoLayer = L.tileLayer(photoUrl, {
+    attribution: '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>',
+    maxZoom: 18
+  });
 
-/* モード切り替えボタン */
-.mode-selector {
-  display: flex;
-  gap: 8px;
-}
-
-.mode-btn {
-  flex: 1;
-  padding: 6px;
-  border: 1px solid #c7c7cc;
-  background: #f2f2f7;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.mode-btn.active {
-  background: #007aff;
-  color: #fff;
-  border-color: #007aff;
-  font-weight: bold;
-}
-
-/* 入力フォーム & 送信ボタン */
-.input-composer {
-  display: flex;
-  gap: 8px;
-}
-
-#message-input {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #c7c7cc;
-  border-radius: 20px;
-  font-size: 15px;
-  outline: none;
-}
-
-#send-btn {
-  padding: 8px 16px;
-  background-color: #007aff;
-  color: #ffffff;
-  border: none;
-  border-radius: 20px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* リプライバー */
-#reply-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: #e5e5ea;
-  padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-}
-
-#reply-bar button {
-  background: none;
-  border: none;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-/* 長押しカスタムポップアップメニュー */
-.context-menu {
-  position: fixed;
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  z-index: 1000;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  min-width: 140px;
-}
-
-.context-menu div {
-  padding: 10px 16px;
-  font-size: 14px;
-  cursor: pointer;
-  border-bottom: 1px solid #f2f2f7;
-}
-
-.context-menu div:last-child {
-  border-bottom: none;
-}
-
-.context-menu div.danger {
-  color: #ff3b30;
+  // レイヤー切り替えコントロールを追加（右上）
+  const baseMaps = {
+    "標準（白黒風）": stdLayer,
+    "航空写真": photoLayer
+  };
+  
+  L.control.layers(baseMaps).addTo(map);
 }
