@@ -367,6 +367,43 @@ function watchConnection() {
 // ==========================================
 // 5. 起動 / LINE LIFF ログイン / メンバー確認
 // ==========================================
+// ---------- LINEログインの無限ループ防止 ----------
+// liff.login() を自動で呼ぶのは、一定時間内に1回まで。
+// ログインから戻っても isLoggedIn() が false のままなら、再度自動で login() せず、ボタン操作に切り替える。
+const LOGIN_TRY_KEY = 'menchat.loginTry.v1';
+const LOGIN_TRY_WINDOW_MS = 2 * 60 * 1000;
+const LOGIN_HASH_KEY = 'menchat.loginHash.v1';
+
+function recentLoginAttempt() {
+  try {
+    const t = parseInt(sessionStorage.getItem(LOGIN_TRY_KEY) || '0', 10);
+    return t > 0 && Date.now() - t < LOGIN_TRY_WINDOW_MS;
+  } catch (e) { return true; } // 記録できない環境では自動ログインしない(ループ防止)
+}
+
+function clearLoginAttempt() {
+  try { sessionStorage.removeItem(LOGIN_TRY_KEY); } catch (e) { /* 何もしない */ }
+}
+
+// LINEのログイン画面へ移動する。復帰先はハッシュ・クエリを除いたURL(ハッシュルートで code が失われるのを避ける)
+function startLineLogin() {
+  try {
+    sessionStorage.setItem(LOGIN_TRY_KEY, String(Date.now()));
+    if (location.hash) sessionStorage.setItem(LOGIN_HASH_KEY, location.hash);
+  } catch (e) { /* 何もしない */ }
+  liff.login({ redirectUri: location.origin + location.pathname });
+}
+
+// 手動ボタン用: 古いLIFFのログイン情報を消してからやり直す
+function retryLineLogin() {
+  try {
+    Object.keys(localStorage).forEach((k) => {
+      if (k.indexOf('LIFF_STORE:' + MY_LIFF_ID) === 0) localStorage.removeItem(k);
+    });
+  } catch (e) { /* 何もしない */ }
+  startLineLogin();
+}
+
 function isStandalone() {
   return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
 }
@@ -431,13 +468,32 @@ async function login() {
         title: 'LINEでログイン',
         msg: 'LINEアカウントでログインしてください。',
         action: 'LINEでログイン',
-        onAction: () => liff.login()
+        onAction: startLineLogin
+      });
+    } else if (recentLoginAttempt()) {
+      // ログインから戻ったのに未ログインのまま → 自動で繰り返さず、ボタンで再試行
+      console.warn('LINEログイン後も未ログイン状態です。自動ログインを停止しました。');
+      showGate({
+        title: 'ログインが完了しませんでした',
+        msg: 'LINEログイン後も認証状態を確認できませんでした。下のボタンからもう一度お試しください。',
+        action: 'LINEでログイン',
+        onAction: retryLineLogin
       });
     } else {
-      liff.login();
+      startLineLogin();
     }
     return;
   }
+
+  // ログイン済み: 試行記録を消し、ログイン前のハッシュ(#/board/... など)を復元
+  clearLoginAttempt();
+  try {
+    const savedHash = sessionStorage.getItem(LOGIN_HASH_KEY);
+    sessionStorage.removeItem(LOGIN_HASH_KEY);
+    if (savedHash && !location.hash) {
+      history.replaceState(history.state, '', location.pathname + location.search + savedHash);
+    }
+  } catch (e) { /* 何もしない */ }
 
   try {
     const profile = await liff.getProfile();
