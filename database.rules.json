@@ -1,0 +1,40 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "messages": {
+      ".read": true,
+      "$room": {
+        "$id": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['userId', 'text', 'timestamp']) && newData.child('text').isString() && newData.child('text').val().length <= 2000"
+        }
+      }
+    },
+
+    "members": {
+      ".read": true,
+      ".write": true
+    },
+
+    "board": {
+      "threads": {
+        ".read": true,
+        "$tid": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['title', 'createdBy', 'postCount']) && newData.child('title').isString() && newData.child('title').val().length <= 60"
+        }
+      },
+      "posts": {
+        "$tid": {
+          ".read": true,
+          "$key": {
+            ".write": true,
+            ".validate": "newData.hasChildren(['no', 'userId', 'timestamp']) && (newData.child('deleted').val() === true || (newData.child('text').isString() && newData.child('text').val().length <= 2000))"
+          }
+        }
+      }
+    }
+  }
+}

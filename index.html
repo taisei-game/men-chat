@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>男性パート チャット</title>
+
+  <!-- PWA / ホーム画面アプリ設定 -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="男性パート">
+  <meta name="format-detection" content="telephone=no">
+
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ヘッダー -->
+  <header id="app-header">
+    <h1 id="page-title">💬 トーク</h1>
+    <button id="info-btn" class="icon-btn" type="button" aria-label="アプリ情報">ⓘ</button>
+  </header>
+
+  <!-- 通信状態バナー -->
+  <div id="status-banner" role="status" hidden>オフラインです。接続すると自動で再開します</div>
+
+  <main id="app-main">
+
+    <!-- ========== トーク ========== -->
+    <section id="view-chat" class="view">
+      <div class="scroll-wrap">
+        <div id="message-container" aria-live="polite"></div>
+        <div id="chat-empty" class="empty" hidden>まだメッセージはありません。<br>最初の一言を送ってみましょう。</div>
+        <button id="chat-jump" class="jump-btn" type="button" aria-label="最新のメッセージへ" hidden>↓</button>
+      </div>
+
+      <footer id="input-area" class="composer">
+        <div id="reply-bar" hidden>
+          <span id="reply-bar-text"></span>
+          <button id="reply-cancel" type="button" aria-label="返信をやめる">✕</button>
+        </div>
+        <div class="mode-selector" role="group" aria-label="投稿モード">
+          <button type="button" class="mode-btn active" data-mode="normal">👤 通常</button>
+          <button type="button" class="mode-btn" data-mode="anon">❓ 匿名</button>
+        </div>
+        <div class="input-composer">
+          <textarea id="message-input" rows="1" placeholder="メッセージを入力..." autocomplete="off" enterkeyhint="send" maxlength="2000"></textarea>
+          <button id="send-btn" type="button">送信</button>
+        </div>
+      </footer>
+    </section>
+
+    <!-- ========== 掲示板 ========== -->
+    <section id="view-board" class="view" data-mode="list" hidden>
+      <!-- 左: スレッド一覧 -->
+      <div id="board-list-pane" class="pane">
+        <div class="scroll-wrap">
+          <div id="thread-list"></div>
+          <div id="thread-empty-list" class="empty" hidden>スレッドはまだありません。<br>右下の ＋ から作成できます。</div>
+        </div>
+        <button id="new-thread-btn" class="fab" type="button" aria-label="スレッドを作成">＋</button>
+      </div>
+
+      <!-- 右: スレッド本文 -->
+      <div id="board-thread-pane" class="pane">
+        <div id="thread-placeholder" class="empty">スレッドを選択してください</div>
+        <div id="thread-body">
+          <div class="thread-head">
+            <button id="thread-back" class="icon-btn" type="button" aria-label="スレッド一覧へ戻る">‹</button>
+            <div id="thread-title" class="thread-title">読み込み中…</div>
+            <button id="thread-menu-btn" class="icon-btn" type="button" aria-label="スレッドのメニュー" hidden>⋯</button>
+          </div>
+          <div class="scroll-wrap">
+            <div id="post-list"></div>
+            <button id="post-jump" class="jump-btn" type="button" aria-label="最新のレスへ" hidden>↓</button>
+          </div>
+          <footer id="post-composer" class="composer">
+            <div class="mode-selector" role="group" aria-label="投稿モード">
+              <button type="button" class="mode-btn active" data-mode="normal">👤 通常</button>
+              <button type="button" class="mode-btn" data-mode="anon">❓ 匿名</button>
+            </div>
+            <div class="input-composer">
+              <textarea id="post-input" rows="1" placeholder="レスを書く（>>1 で返信）" autocomplete="off" maxlength="2000"></textarea>
+              <button id="post-send-btn" type="button">書き込む</button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 下タブ -->
+  <nav id="tab-bar" aria-label="メインメニュー">
+    <button id="tab-chat" class="tab active" type="button" aria-selected="true"><span class="tab-icon">💬</span><span class="tab-label">トーク</span><i class="tab-dot" hidden></i></button>
+    <button id="tab-board" class="tab" type="button" aria-selected="false"><span class="tab-icon">📋</span><span class="tab-label">掲示板</span><i class="tab-dot" hidden></i></button>
+  </nav>
+
+  <!-- 新規スレッド作成シート -->
+  <div id="thread-sheet" class="overlay" hidden>
+    <form id="thread-form" class="sheet" novalidate>
+      <h2>新しいスレッド</h2>
+      <label class="field">
+        <span>タイトル</span>
+        <input id="thread-title-input" type="text" maxlength="60" placeholder="60文字まで" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>最初の書き込み</span>
+        <textarea id="thread-body-input" rows="5" maxlength="2000" placeholder="本文を入力"></textarea>
+      </label>
+      <div class="mode-selector" role="group" aria-label="投稿モード">
+        <button type="button" class="mode-btn active" data-mode="normal">👤 通常</button>
+        <button type="button" class="mode-btn" data-mode="anon">❓ 匿名</button>
+      </div>
+      <div class="row">
+        <button id="thread-cancel" type="button" class="btn">キャンセル</button>
+        <button id="thread-create" type="submit" class="btn primary">作成する</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 確認ダイアログ -->
+  <div id="dialog" class="overlay" hidden>
+    <div class="sheet small" role="alertdialog" aria-modal="true" aria-labelledby="dialog-msg">
+      <p id="dialog-msg"></p>
+      <div class="row">
+        <button id="dialog-cancel" type="button" class="btn">キャンセル</button>
+        <button id="dialog-ok" type="button" class="btn primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- アプリ情報シート -->
+  <div id="info-sheet" class="overlay" hidden>
+    <div class="sheet small" role="dialog" aria-modal="true" aria-label="アプリ情報">
+      <h2>アプリ情報</h2>
+      <dl class="info-list">
+        <dt>名前</dt><dd id="info-name">-</dd>
+        <dt>ユーザーID</dt><dd id="info-uid" class="mono">-</dd>
+        <dt>バージョン</dt><dd id="info-version">-</dd>
+      </dl>
+      <div class="row">
+        <button id="info-copy" type="button" class="btn">IDをコピー</button>
+        <button id="info-reload" type="button" class="btn">再読み込み</button>
+      </div>
+      <button id="info-close" type="button" class="btn primary block">閉じる</button>
+    </div>
+  </div>
+
+  <!-- 起動・ログイン・利用制限の画面 -->
+  <div id="gate" class="gate">
+    <div class="gate-card">
+      <img class="gate-logo" src="icons/icon-192.png" alt="" width="72" height="72">
+      <h2 id="gate-title">読み込み中…</h2>
+      <p id="gate-msg"></p>
+      <button id="gate-action" type="button" class="btn primary" hidden></button>
+      <button id="gate-copy" type="button" class="btn" hidden>ユーザーIDをコピー</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- 外部SDK (LINE LIFF, Firebase) -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <!-- アプリ本体 -->
+  <script src="config.js"></script>
+  <script src="script.js"></script>
+  <script src="board.js"></script>
+  <script>window.addEventListener('DOMContentLoaded', function () { App.boot(); });</script>
+</body>
+</html>
